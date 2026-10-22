@@ -1,0 +1,151 @@
+// Laptop unit tests for hardware-free logic. Run with:  pio test -e native
+#include <unity.h>
+
+#include "../../src/core/format.h"
+#include "../../src/core/journal.h"
+#include "../../src/core/timeutil.h"
+#include "../../src/core/vibe.h"
+
+using namespace ft;
+
+static int64_t at(int y, int mo, int d, int h, int mi, int s = 0) {
+  CivilTime t{y, (uint8_t)mo, (uint8_t)d, (uint8_t)h, (uint8_t)mi, (uint8_t)s};
+  return toLocalSeconds(t);
+}
+
+void setUp() {}
+void tearDown() {}
+
+// ---- tracking day (guide Section 1) ----
+void test_tracking_day_boundary() {
+  TEST_ASSERT_EQUAL_UINT32(20261020, trackingDay(at(2026, 10, 20, 23, 30)));  // Tue 11:30 PM -> Tue
+  TEST_ASSERT_EQUAL_UINT32(20261020, trackingDay(at(2026, 10, 21, 1, 30)));   // Wed 1:30 AM -> Tue
+  TEST_ASSERT_EQUAL_UINT32(20261020, trackingDay(at(2026, 10, 21, 2, 59, 59)));
+  TEST_ASSERT_EQUAL_UINT32(20261021, trackingDay(at(2026, 10, 21, 3, 0, 0)));  // Wed 3:00 AM -> Wed
+}
+
+void test_tracking_day_month_and_year_edges() {
+  TEST_ASSERT_EQUAL_UINT32(20261031, trackingDay(at(2026, 11, 1, 2, 0)));
+  TEST_ASSERT_EQUAL_UINT32(20261231, trackingDay(at(2027, 1, 1, 0, 15)));
+  TEST_ASSERT_EQUAL_UINT32(20280228, trackingDay(at(2028, 2, 29, 1, 0)));  // leap day
+  TEST_ASSERT_EQUAL_UINT32(20280229, trackingDay(at(2028, 2, 29, 3, 0)));
+}
+
+void test_civil_roundtrip_and_weekday() {
+  int64_t s = at(2026, 10, 22, 0, 41, 12);
+  CivilTime t = fromLocalSeconds(s);
+  TEST_ASSERT_EQUAL_INT32(2026, t.year);
+  TEST_ASSERT_EQUAL_UINT8(10, t.month);
+  TEST_ASSERT_EQUAL_UINT8(22, t.day);
+  TEST_ASSERT_EQUAL_UINT8(0, t.hour);
+  TEST_ASSERT_EQUAL_UINT8(41, t.minute);
+  TEST_ASSERT_EQUAL_UINT8(12, t.second);
+  TEST_ASSERT_EQUAL_INT(3, weekday(s));  // Thursday
+  TEST_ASSERT_TRUE(isPlausible(t));
+  CivilTime bad{2000, 1, 1, 0, 0, 0};
+  TEST_ASSERT_FALSE(isPlausible(bad));
+}
+
+// ---- journal (guide Section 8) ----
+static Entry food(const char* id, int64_t ts, float kcal, float prot) {
+  Entry e;
+  e.id = id; e.ts = ts; e.kind = EntryKind::Food; e.foodId = "x"; e.name = "Thing | with bar";
+  e.kcal = kcal; e.protein = prot;
+  return e;
+}
+
+void test_journal_add_edit_delete_totals() {
+  int64_t t1 = at(2026, 10, 21, 13, 0);
+  int64_t late = at(2026, 10, 22, 1, 30);  // still the 21st's tracking day
+  std::string j = encodeAdd(1, food("a", t1, 450, 12)) + "\n" + encodeAdd(2, food("b", late, 200, 8)) + "\n";
+  Entry w; w.id = "w1"; w.ts = t1; w.kind = EntryKind::Water; w.waterOz = 8;
+  j += encodeAdd(3, w) + "\n";
+  Ledger L;
+  size_t bad = 99;
+  TEST_ASSERT_EQUAL(3, L.replay(j, &bad));
+  TEST_ASSERT_EQUAL(0, bad);
+  Totals t = L.totalsFor(20261021);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 650, t.kcal);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 20, t.protein);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 8, t.waterOz);
+  TEST_ASSERT_EQUAL_UINT32(2, t.foodCount);
+  TEST_ASSERT_EQUAL_STRING("Thing / with bar", L.find("a")->name.c_str());
+
+  Entry half = *L.find("a"); half.servings = 0.5f; half.kcal = 225; half.protein = 6;
+  TEST_ASSERT_TRUE(L.applyLine(encodeEdit(4, half)));
+  TEST_ASSERT_TRUE(L.applyLine(encodeDelete(5, "b")));
+  t = L.totalsFor(20261021);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 225, t.kcal);
+  TEST_ASSERT_TRUE(L.find("a")->edited);
+  TEST_ASSERT_EQUAL_UINT32(5, L.lastSeq());
+}
+
+void test_journal_edit_time_moves_day() {
+  Ledger L;
+  TEST_ASSERT_TRUE(L.applyLine(encodeAdd(1, food("a", at(2026, 10, 21, 16, 0), 300, 10))));
+  Entry moved = *L.find("a"); moved.ts = at(2026, 10, 21, 2, 0);  // previous tracking day
+  TEST_ASSERT_TRUE(L.applyLine(encodeEdit(2, moved)));
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 0, L.totalsFor(20261021).kcal);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 300, L.totalsFor(20261020).kcal);
+}
+
+void test_journal_rejects_torn_corrupt_and_duplicates() {
+  std::string good = encodeAdd(1, food("a", at(2026, 10, 21, 12, 0), 100, 1));
+  std::string corrupt = good; corrupt[corrupt.find("100.00")] = '9';
+  std::string torn = encodeAdd(3, food("c", at(2026, 10, 21, 12, 0), 500, 5)).substr(0, 20);
+  std::string j = good + "\n" + corrupt + "\n" + good + "\n" + torn;  // dup + no newline
+  Ledger L;
+  size_t bad = 0;
+  TEST_ASSERT_EQUAL(1, L.replay(j, &bad));
+  TEST_ASSERT_EQUAL(3, bad);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 100, L.totalsFor(20261021).kcal);
+  TEST_ASSERT_FALSE(L.applyLine(encodeDelete(9, "nope")));
+}
+
+void test_entries_newest_first() {
+  Ledger L;
+  L.applyLine(encodeAdd(1, food("a", at(2026, 10, 21, 9, 0), 1, 0)));
+  L.applyLine(encodeAdd(2, food("b", at(2026, 10, 21, 20, 0), 1, 0)));
+  auto v = L.entriesFor(20261021);
+  TEST_ASSERT_EQUAL(2, v.size());
+  TEST_ASSERT_EQUAL_STRING("b", v[0]->id.c_str());
+}
+
+// ---- formatting (guide Section 7) ----
+void test_format() {
+  TEST_ASSERT_EQUAL_STRING("1,820 / 3,000 kcal", progressText(1820.4f, 3000, "kcal").c_str());
+  TEST_ASSERT_EQUAL_STRING("3,250 / 3,000 kcal", progressText(3250, 3000, "kcal").c_str());
+  TEST_ASSERT_EQUAL_STRING("999", withCommas(999).c_str());
+  TEST_ASSERT_EQUAL_STRING("1,000,000", withCommas(1000000).c_str());
+  TEST_ASSERT_FLOAT_WITHIN(0.001, 1.0, progressFraction(3250, 3000));
+  TEST_ASSERT_EQUAL_STRING("12:05 AM", clock12(0, 5).c_str());
+  TEST_ASSERT_EQUAL_STRING("4:12 PM", clock12(16, 12).c_str());
+}
+
+// ---- vibration patterns (guide Section 8) ----
+void test_vibe_patterns() {
+  VibeSequencer v;
+  v.start(VibePattern::Water, 1000);
+  TEST_ASSERT_TRUE(v.isOn(1000));
+  TEST_ASSERT_FALSE(v.isOn(1200));  // gap
+  TEST_ASSERT_TRUE(v.isOn(1350));   // second pulse
+  TEST_ASSERT_FALSE(v.isOn(1500));
+  TEST_ASSERT_FALSE(v.active());
+  v.start(VibePattern::Eating, 0);
+  TEST_ASSERT_TRUE(v.isOn(599));
+  TEST_ASSERT_FALSE(v.isOn(600));
+}
+
+int main(int, char**) {
+  UNITY_BEGIN();
+  RUN_TEST(test_tracking_day_boundary);
+  RUN_TEST(test_tracking_day_month_and_year_edges);
+  RUN_TEST(test_civil_roundtrip_and_weekday);
+  RUN_TEST(test_journal_add_edit_delete_totals);
+  RUN_TEST(test_journal_edit_time_moves_day);
+  RUN_TEST(test_journal_rejects_torn_corrupt_and_duplicates);
+  RUN_TEST(test_entries_newest_first);
+  RUN_TEST(test_format);
+  RUN_TEST(test_vibe_patterns);
+  return UNITY_END();
+}
