@@ -275,54 +275,66 @@ void drawHome() {
   }
 }
 
+void emptyNote(int y, const char* text, uint32_t color) {
+  canvas.setFont(&fonts::FreeSans9pt7b);
+  canvas.setTextColor(color);
+  canvas.setTextDatum(top_left);
+  canvas.drawString(fit(text, 304).c_str(), 8, y + 6);
+}
+
 void drawLogFood() {
   header("Log food");
-  button({4, 34, 154, 34}, "Browse all", [] {
+  button({4, 34, 102, 34}, "Browse all", [] {
     S.listScroll = 0;
     S.screen = Screen::Browse;
   });
-  button({162, 34, 154, 34}, "Custom entry", [] {
+  button({109, 34, 102, 34}, "Custom", [] {
     S.custom = app::CustomForm{};
     S.screen = Screen::Custom;
+  });
+  button({214, 34, 102, 34}, "Favorites", [] {
+    S.listScroll = 0;
+    S.screen = Screen::Favorites;
   });
 
   beginList({0, 72, 320, 144});
   int y = 72 - S.listScroll;
   int top = y;
   if (!foods::hasFoods()) {
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextColor(cWarn);
-    canvas.setTextDatum(top_left);
-    canvas.drawString(fit(foods::loadMessage().c_str(), 304).c_str(), 8, y + 6);
+    emptyNote(y, foods::loadMessage().c_str(), cWarn);
     y += 30;
   }
-  auto favs = foods::favorites();
-  sectionLabel(y, "Favorites");
-  y += 24;
-  if (favs.empty()) {
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextColor(cMuted);
-    canvas.drawString("Open any food and tap the star.", 8, y + 2);
-    y += 26;
-  }
-  for (const ft::FoodDef* f : favs) {
-    foodRow(y, *f, Screen::LogFood);
-    y += kRowH;
-  }
-  std::vector<std::string> recent = ft::recentFoodIds(S.ledger, foods::db(), 8);
-  std::vector<const ft::FoodDef*> recentDefs;
-  for (const auto& id : recent)
-    if (!foods::isFavorite(id) && recentDefs.size() < 6) recentDefs.push_back(foods::db().find(id));
   sectionLabel(y, "Recent");
   y += 24;
-  if (recentDefs.empty()) {
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextColor(cMuted);
-    canvas.drawString("Foods you log show up here.", 8, y + 2);
-    y += 26;
+  std::vector<std::string> recent = ft::recentFoodIds(S.ledger, foods::db(), 8);
+  if (recent.empty()) {
+    emptyNote(y, "Foods you log show up here.", cMuted);
+    y += 30;
   }
-  for (const ft::FoodDef* f : recentDefs) {
-    foodRow(y, *f, Screen::LogFood);
+  for (const auto& id : recent) {
+    foodRow(y, *foods::db().find(id), Screen::LogFood);
+    y += kRowH;
+  }
+  endList(y - top);
+}
+
+void drawFavorites() {
+  button({0, 0, 76, 30}, "< Back", [] { openLogFood(); });
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextColor(cText);
+  canvas.drawString("Favorites", 160, 15);
+  beginList({0, 34, 320, 182});
+  int y = 34 - S.listScroll;
+  int top = y;
+  auto favs = foods::favorites();
+  if (favs.empty()) {
+    emptyNote(y, "No favorites yet.", cText);
+    emptyNote(y + 24, "Open any food and tap the star.", cMuted);
+    y += 56;
+  }
+  for (const ft::FoodDef* f : favs) {
+    foodRow(y, *f, Screen::Favorites);
     y += kRowH;
   }
   endList(y - top);
@@ -655,6 +667,7 @@ void draw() {
     case Screen::Home: drawHome(); break;
     case Screen::LogFood: drawLogFood(); break;
     case Screen::Browse: drawBrowse(); break;
+    case Screen::Favorites: drawFavorites(); break;
     case Screen::Picker: drawPicker(); break;
     case Screen::ComboAdjust: drawComboAdjust(); break;
     case Screen::Custom: drawCustom(); break;

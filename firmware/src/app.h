@@ -10,7 +10,7 @@
 
 namespace app {
 
-constexpr const char* kFirmwareVersion = "0.2.1-m2";
+constexpr const char* kFirmwareVersion = "0.2.2-m2";
 constexpr int kSchemaVersion = 1;
 
 struct Settings {
@@ -24,7 +24,7 @@ struct Settings {
   uint32_t saveCounter = 0;    // M1 test: proves atomic settings writes survive reboot
 };
 
-enum class Screen { Home, LogFood, Browse, Picker, ComboAdjust, Custom, Diagnostics, Reminder };
+enum class Screen { Home, LogFood, Browse, Favorites, Picker, ComboAdjust, Custom, Diagnostics, Reminder };
 
 // Custom entry form (guide Section 4)
 struct CustomForm {

@@ -18,7 +18,7 @@ works yet (it opens the hardware test screen from M1).
 
 | # | Do this | Expect | Result |
 | --- | --- | --- | --- |
-| A1 | Tap the **left circle** | Log Food screen: Browse all, Custom entry, Favorites, Recent | |
+| A1 | Tap the **left circle** | Log Food screen: Browse all · Custom · Favorites buttons, Recent list below | |
 | A2 | Tap **< Back** or the **middle circle** | Home | |
 
 ## B. Browse and serving picker
@@ -38,10 +38,10 @@ works yet (it opens the hardware test screen from M1).
 | # | Do this | Expect | Result |
 | --- | --- | --- | --- |
 | C1 | In a picker, tap the **star** (top right) | Star fills; "Added to favorites" | |
-| C2 | Open Log Food | That food is under Favorites with a small star | |
-| C3 | Log 2–3 different foods, open Log Food | They appear under Recent, newest first (favorites aren't repeated) | |
-| C4 | **Press and hold** a favorite ~0.6 s | Logs 1 serving instantly, Home with Undo | |
-| C5 | Count taps: left circle → hold a favorite | Logged in **2 actions** | |
+| C2 | Log Food → **Favorites** | That food is listed, with a small star | |
+| C3 | Log 2–3 different foods, open Log Food | They appear under Recent, newest first | |
+| C4 | **Press and hold** a food in Recent or Favorites ~0.6 s | Logs 1 serving instantly, Home with Undo | |
+| C5 | Count taps: left circle → hold a recent food | Logged in **2 actions** (3 via Favorites) | |
 
 ## D. Combos
 
