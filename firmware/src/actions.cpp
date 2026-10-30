@@ -125,4 +125,19 @@ void undoLast() {
   S.undoUntilMs = 0;
 }
 
+bool saveEdit(const ft::Entry& edited) {
+  if (!S.ledger.find(edited.id)) return false;
+  if (!commitLine(ft::encodeEdit(S.ledger.lastSeq() + 1, edited))) return false;
+  app::showToast("Saved");
+  return true;
+}
+
+bool deleteEntry(const std::string& id) {
+  if (!S.ledger.find(id)) return false;
+  if (!commitLine(ft::encodeDelete(S.ledger.lastSeq() + 1, id))) return false;
+  if (S.undoId == id) S.undoId.clear();
+  app::showToast("Deleted");
+  return true;
+}
+
 }  // namespace actions

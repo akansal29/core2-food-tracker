@@ -8,6 +8,7 @@
 
 #include "actions.h"
 #include "core/format.h"
+#include "core/history.h"
 #include "core/nutrition.h"
 #include "core/timeutil.h"
 #include "food_store.h"
@@ -252,7 +253,9 @@ void drawHome() {
     } else if (S.resumeScreen != Screen::Home && millis() < S.resumeUntilMs) {
       canvas.setTextColor(cKcal);
       const ft::FoodDef* f = foods::db().find(S.pickerFoodId);
-      std::string what = S.resumeScreen == Screen::Custom ? "custom entry" : (f ? f->name : "entry");
+      std::string what = S.resumeScreen == Screen::Custom      ? "custom entry"
+                         : S.resumeScreen == Screen::EntryEdit ? "editing " + S.editEntry.name
+                         : (f ? f->name : "entry");
       canvas.drawString(fit("Tap to resume: " + what, 304).c_str(), 8, 154);
       addHit({0, 148, 320, 26}, [] {
         S.screen = S.resumeScreen;
@@ -268,7 +271,7 @@ void drawHome() {
       canvas.drawString(("Last food " + ft::clock12(c.hour, c.minute)).c_str(), 8, 154);
     }
     bool en = !S.locked;
-    button({4, 178, 74, 36}, "Today", [] { app::showToast("Today's Log arrives in Milestone 3"); }, 0, en);
+    button({4, 178, 74, 36}, "Today", [] { openToday(); }, 0, en);
     button({82, 178, 74, 36}, "Ideas", [] { app::showToast("Suggestions arrive in Milestone 6"); }, 0, en);
     button({160, 178, 74, 36}, "Trends", [] { app::showToast("Trends arrive in Milestone 6"); }, 0, en);
     button({238, 178, 78, 36}, "Settings", [] { S.screen = Screen::Diagnostics; }, 0, en);
@@ -573,6 +576,243 @@ void drawCustom() {
   canvas.drawString(valid ? "Name: Custom + time" : "Enter calories", 8, 190);
 }
 
+// ---------- Today's Log, Past Days, entry editing (guide Section 5) ----------
+
+uint32_t shownDay() {
+  if (S.viewDay) return S.viewDay;
+  int64_t now;
+  return app::nowLocal(now) ? ft::trackingDay(now) : 0;
+}
+
+bool showingToday() {
+  int64_t now;
+  return S.viewDay == 0 || (app::nowLocal(now) && S.viewDay == ft::trackingDay(now));
+}
+
+std::string entryTime(const ft::Entry& e) {
+  ft::CivilTime c = ft::fromLocalSeconds(e.ts);
+  return ft::clock12(c.hour, c.minute);
+}
+
+void entryRow(int y, const ft::Entry& e) {
+  Rect r{4, (int16_t)y, 312, 40};
+  canvas.fillRoundRect(r.x, r.y, r.w, r.h, 6, cButton);
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(top_left);
+  canvas.setTextColor(cText);
+  canvas.drawString(fit(e.name, 210).c_str(), 12, y + 3);
+  canvas.setFont(&fonts::FreeSans9pt7b);
+  canvas.setTextDatum(top_right);
+  canvas.setTextColor(cMuted);
+  canvas.drawString(entryTime(e).c_str(), 308, y + 3);
+  canvas.setTextDatum(top_left);
+  std::string sub;
+  if (e.kind == ft::EntryKind::Water) {
+    canvas.setTextColor(cWater);
+    sub = std::to_string((int)lroundf(e.waterOz)) + " oz water";
+  } else {
+    sub = kcalText(e.kcal) + " | " + proteinText(e.protein);
+    if (e.kind != ft::EntryKind::Custom) sub += " | " + ft::servingsLabel(e.servings);
+  }
+  if (e.edited) sub += " | edited";
+  canvas.drawString(fit(sub, 296).c_str(), 12, y + 21);
+
+  int top = y > listView.y ? y : listView.y;
+  int bottom = (y + r.h) < (listView.y + listView.h) ? (y + r.h) : (listView.y + listView.h);
+  if (bottom - top < 8) return;
+  std::string id = e.id;
+  addHit({r.x, (int16_t)top, r.w, (int16_t)(bottom - top)}, [id] {
+    const ft::Entry* found = S.ledger.find(id);
+    if (!found) return;
+    S.editEntry = *found;
+    S.editOrigServings = found->servings;
+    S.editReturn = Screen::DayLog;
+    S.deleteArmedUntilMs = 0;
+    S.screen = Screen::EntryEdit;
+  });
+}
+
+void drawDayLog() {
+  uint32_t day = shownDay();
+  bool today = showingToday();
+  if (today) {
+    header("Today");
+    button({222, 0, 98, 30}, "Past days", [] {
+      S.listScroll = 0;
+      S.screen = Screen::PastDays;
+    });
+  } else {
+    button({0, 0, 76, 30}, "< Back", [] {
+      S.listScroll = 0;
+      S.screen = Screen::PastDays;
+    });
+    canvas.setFont(&fonts::FreeSansBold9pt7b);
+    canvas.setTextDatum(middle_center);
+    canvas.setTextColor(cText);
+    canvas.drawString(ft::dayLabel(day).c_str(), 160, 15);
+  }
+  if (!day) {
+    emptyNote(40, "Set the clock to see today's entries.", cWarn);
+    return;
+  }
+
+  ft::Totals t = S.ledger.totalsFor(day);
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(top_left);
+  canvas.setTextColor(cKcal);
+  canvas.drawString(ft::progressText(t.kcal, S.settings.kcalTarget, "kcal").c_str(), 8, 34);
+  canvas.setTextColor(cWater);
+  canvas.drawString(ft::progressText(t.waterOz, S.settings.waterTargetOz, "oz").c_str(), 8, 52);
+  canvas.setTextDatum(top_right);
+  canvas.setTextColor(cProtein);
+  canvas.drawString(ft::progressText(t.protein, S.settings.proteinTarget, "g").c_str(), 312, 34);
+  canvas.setFont(&fonts::FreeSans9pt7b);
+  canvas.setTextColor(cMuted);
+  if (t.lastFoodTs) {
+    ft::CivilTime c = ft::fromLocalSeconds(t.lastFoodTs);
+    canvas.drawString(("Last food " + ft::clock12(c.hour, c.minute)).c_str(), 312, 52);
+  }
+  canvas.setTextDatum(top_left);
+  canvas.drawString(ft::remainingText(t.kcal, S.settings.kcalTarget, t.protein, S.settings.proteinTarget).c_str(), 8,
+                    70);
+
+  beginList({0, 90, 320, 126});
+  int y = 90 - S.listScroll;
+  int top = y;
+  auto entries = S.ledger.entriesFor(day);
+  if (entries.empty()) {
+    emptyNote(y, today ? "Nothing logged yet today." : "No entries this day.", cMuted);
+    y += 30;
+  }
+  for (const ft::Entry* e : entries) {
+    entryRow(y, *e);
+    y += 44;
+  }
+  endList(y - top);
+}
+
+void drawPastDays() {
+  button({0, 0, 76, 30}, "< Back", [] { openToday(); });
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextColor(cText);
+  canvas.drawString("Past days", 160, 15);
+
+  int64_t now = 0;
+  uint32_t today = app::nowLocal(now) ? ft::trackingDay(now) : 0;
+  beginList({0, 34, 320, 182});
+  int y = 34 - S.listScroll;
+  int top = y;
+  auto days = ft::loggedDays(S.ledger);
+  if (days.empty()) {
+    emptyNote(y, "No entries yet.", cMuted);
+    y += 30;
+  }
+  for (uint32_t d : days) {
+    Rect r{4, (int16_t)y, 312, 40};
+    canvas.fillRoundRect(r.x, r.y, r.w, r.h, 6, cButton);
+    canvas.setFont(&fonts::FreeSansBold9pt7b);
+    canvas.setTextDatum(top_left);
+    canvas.setTextColor(cText);
+    canvas.drawString((ft::dayLabel(d) + (d == today ? "  (today)" : "")).c_str(), 12, y + 3);
+    ft::Totals t = S.ledger.totalsFor(d);
+    canvas.setFont(&fonts::FreeSans9pt7b);
+    canvas.setTextColor(cMuted);
+    std::string sub = kcalText(t.kcal) + " | " + proteinText(t.protein) + " | " +
+                      std::to_string((int)lroundf(t.waterOz)) + " oz";
+    canvas.drawString(fit(sub, 296).c_str(), 12, y + 21);
+    int vTop = y > listView.y ? y : listView.y;
+    int vBottom = (y + r.h) < (listView.y + listView.h) ? (y + r.h) : (listView.y + listView.h);
+    if (vBottom - vTop >= 8) {
+      addHit({r.x, (int16_t)vTop, r.w, (int16_t)(vBottom - vTop)}, [d, today] {
+        S.viewDay = (d == today) ? 0 : d;
+        S.listScroll = 0;
+        S.screen = Screen::DayLog;
+      });
+    }
+    y += 44;
+  }
+  endList(y - top);
+}
+
+void drawEntryEdit() {
+  const ft::Entry* orig = S.ledger.find(S.editEntry.id);
+  if (!orig) {
+    S.screen = S.editReturn;
+    return;
+  }
+  ft::Entry& e = S.editEntry;
+  button({0, 0, 76, 30}, "< Back", [] { S.screen = S.editReturn; });
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextColor(cText);
+  canvas.drawString(fit(e.name, 230).c_str(), 196, 15);
+
+  canvas.setFont(&fonts::FreeSans9pt7b);
+  canvas.setTextDatum(top_center);
+  canvas.setTextColor(cMuted);
+  canvas.drawString((entryTime(e) + "  |  counts for " + ft::dayLabel(ft::trackingDay(e.ts))).c_str(), 160, 36);
+
+  bool water = e.kind == ft::EntryKind::Water;
+  button({8, 56, 56, 36}, "-", [water] {
+    const ft::Entry* o = S.ledger.find(S.editEntry.id);
+    if (!o) return;
+    if (water) {
+      if (S.editEntry.waterOz > 2) S.editEntry.waterOz -= 2;
+    } else {
+      int64_t ts = S.editEntry.ts;
+      S.editEntry = ft::rescaleEntry(*o, ft::snapServings(S.editEntry.servings - 0.25f));
+      S.editEntry.ts = ts;
+    }
+  });
+  button({256, 56, 56, 36}, "+", [water] {
+    const ft::Entry* o = S.ledger.find(S.editEntry.id);
+    if (!o) return;
+    if (water) {
+      if (S.editEntry.waterOz < 64) S.editEntry.waterOz += 2;
+    } else {
+      int64_t ts = S.editEntry.ts;
+      S.editEntry = ft::rescaleEntry(*o, ft::snapServings(S.editEntry.servings + 0.25f));
+      S.editEntry.ts = ts;
+    }
+  });
+  canvas.setFont(&fonts::FreeSansBold12pt7b);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextColor(cText);
+  std::string amount = water ? std::to_string((int)lroundf(e.waterOz)) + " oz" : ft::servingsLabel(e.servings);
+  canvas.drawString(amount.c_str(), 160, 74);
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextColor(water ? cWater : cKcal);
+  if (!water) canvas.drawString((kcalText(e.kcal) + ",  " + proteinText(e.protein) + " protein").c_str(), 160, 104);
+  else canvas.drawString("Water", 160, 104);
+
+  static const struct { const char* label; int delta; } kShifts[] = {
+      {"-1 h", -3600}, {"-15 min", -900}, {"+15 min", 900}, {"+1 h", 3600}};
+  for (int i = 0; i < 4; ++i) {
+    int delta = kShifts[i].delta;
+    button({(int16_t)(4 + i * 79), 124, 75, 34}, kShifts[i].label, [delta] {
+      int64_t now;
+      if (app::nowLocal(now)) S.editEntry.ts = ft::shiftTime(S.editEntry.ts, delta, now);
+    });
+  }
+
+  bool armed = millis() < S.deleteArmedUntilMs;
+  button({4, 180, 104, 36}, armed ? "Tap again" : "Delete", [] {
+    if (millis() < S.deleteArmedUntilMs) {
+      if (actions::deleteEntry(S.editEntry.id)) S.screen = S.editReturn;
+      S.deleteArmedUntilMs = 0;
+    } else {
+      S.deleteArmedUntilMs = millis() + 3000;
+    }
+  }, armed ? cWarn : 0);
+  bool changed = e.ts != orig->ts || fabsf(e.servings - orig->servings) > 0.001f ||
+                 fabsf(e.waterOz - orig->waterOz) > 0.001f;
+  button({112, 180, 96, 36}, "Cancel", [] { S.screen = S.editReturn; });
+  button({212, 180, 104, 36}, "Save", [] {
+    if (actions::saveEdit(S.editEntry)) S.screen = S.editReturn;
+  }, changed ? cKcal : 0, changed);
+}
+
 void drawDiagnostics() {
   header("Settings (test build)");
   canvas.setFont(&fonts::FreeSans9pt7b);
@@ -668,6 +908,9 @@ void draw() {
     case Screen::LogFood: drawLogFood(); break;
     case Screen::Browse: drawBrowse(); break;
     case Screen::Favorites: drawFavorites(); break;
+    case Screen::DayLog: drawDayLog(); break;
+    case Screen::PastDays: drawPastDays(); break;
+    case Screen::EntryEdit: drawEntryEdit(); break;
     case Screen::Picker: drawPicker(); break;
     case Screen::ComboAdjust: drawComboAdjust(); break;
     case Screen::Custom: drawCustom(); break;
@@ -717,6 +960,13 @@ void goHome() {
   redraw = true;
 }
 
+void openToday() {
+  S.viewDay = 0;
+  S.screen = Screen::DayLog;
+  S.listScroll = 0;
+  redraw = true;
+}
+
 void openLogFood() {
   S.screen = Screen::LogFood;
   S.listScroll = 0;
@@ -724,7 +974,8 @@ void openLogFood() {
 }
 
 void onSleep() {
-  if (S.screen == Screen::Picker || S.screen == Screen::ComboAdjust || S.screen == Screen::Custom) {
+  if (S.screen == Screen::Picker || S.screen == Screen::ComboAdjust || S.screen == Screen::Custom ||
+      S.screen == Screen::EntryEdit) {
     S.resumeScreen = S.screen;
     S.resumeUntilMs = millis() + 120000;
   } else {

@@ -21,4 +21,8 @@ bool logCustom(float kcal, float protein, bool saveAsFood);
 bool addWater(float oz);
 void undoLast();
 
+// Today's Log / Past Days corrections. Never trigger reminders (guide Section 4).
+bool saveEdit(const ft::Entry& edited);
+bool deleteEntry(const std::string& id);
+
 }  // namespace actions

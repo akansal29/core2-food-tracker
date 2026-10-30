@@ -2,6 +2,7 @@
 #include <unity.h>
 
 #include "../../src/core/format.h"
+#include "../../src/core/history.h"
 #include "../../src/core/journal.h"
 #include "../../src/core/nutrition.h"
 #include "../../src/core/timeutil.h"
@@ -223,6 +224,44 @@ void test_recents() {
   TEST_ASSERT_EQUAL(kDrinkable, parseTag("drinkable"));
 }
 
+// ---- history (guide Sections 4 and 5) ----
+void test_logged_days_and_labels() {
+  Ledger L;
+  L.applyLine(encodeAdd(1, food("a", at(2026, 10, 28, 12, 0), 100, 1)));
+  L.applyLine(encodeAdd(2, food("b", at(2026, 10, 30, 1, 0), 100, 1)));  // still the 29th
+  L.applyLine(encodeAdd(3, food("c", at(2026, 10, 30, 9, 0), 100, 1)));
+  L.applyLine(encodeAdd(4, food("d", at(2026, 10, 28, 18, 0), 100, 1)));
+  auto days = loggedDays(L);
+  TEST_ASSERT_EQUAL(3, days.size());
+  TEST_ASSERT_EQUAL_UINT32(20261030, days[0]);
+  TEST_ASSERT_EQUAL_UINT32(20261029, days[1]);
+  TEST_ASSERT_EQUAL_UINT32(20261028, days[2]);
+  TEST_ASSERT_EQUAL_STRING("Thu Oct 29", dayLabel(20261029).c_str());
+  TEST_ASSERT_EQUAL_STRING("Fri Jan 1", dayLabel(20270101).c_str());
+}
+
+void test_rescale_uses_snapshot() {
+  Entry e = food("a", 0, 190, 8);
+  e.servings = 1;
+  Entry half = rescaleEntry(e, 0.5f);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 95, half.kcal);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 4, half.protein);
+  Entry back = rescaleEntry(half, 2);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 380, back.kcal);
+  Entry w; w.kind = EntryKind::Water; w.waterOz = 8;
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 8, rescaleEntry(w, 3).waterOz);
+}
+
+void test_shift_time_and_remaining() {
+  int64_t now = at(2026, 10, 30, 18, 0);
+  TEST_ASSERT_TRUE(shiftTime(now - 600, 3600, now) == now);   // never into the future
+  TEST_ASSERT_TRUE(shiftTime(now, -900, now) == now - 900);
+  TEST_ASSERT_EQUAL_STRING("1,180 kcal and 46 g to go", remainingText(1820, 3000, 54, 100).c_str());
+  TEST_ASSERT_EQUAL_STRING("Calories reached, 12 g protein to go", remainingText(3100, 3000, 88, 100).c_str());
+  TEST_ASSERT_EQUAL_STRING("500 kcal to go, protein reached", remainingText(2500, 3000, 120, 100).c_str());
+  TEST_ASSERT_EQUAL_STRING("Both targets reached", remainingText(3000, 3000, 100, 100).c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tracking_day_boundary);
@@ -238,5 +277,8 @@ int main(int, char**) {
   RUN_TEST(test_combo_bad_ingredient);
   RUN_TEST(test_servings);
   RUN_TEST(test_recents);
+  RUN_TEST(test_logged_days_and_labels);
+  RUN_TEST(test_rescale_uses_snapshot);
+  RUN_TEST(test_shift_time_and_remaining);
   return UNITY_END();
 }

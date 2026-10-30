@@ -10,7 +10,7 @@
 
 namespace app {
 
-constexpr const char* kFirmwareVersion = "0.2.2-m2";
+constexpr const char* kFirmwareVersion = "0.3.0-m3";
 constexpr int kSchemaVersion = 1;
 
 struct Settings {
@@ -24,7 +24,11 @@ struct Settings {
   uint32_t saveCounter = 0;    // M1 test: proves atomic settings writes survive reboot
 };
 
-enum class Screen { Home, LogFood, Browse, Favorites, Picker, ComboAdjust, Custom, Diagnostics, Reminder };
+enum class Screen {
+  Home, LogFood, Browse, Favorites, Picker, ComboAdjust, Custom,
+  DayLog, PastDays, EntryEdit,
+  Diagnostics, Reminder
+};
 
 // Custom entry form (guide Section 4)
 struct CustomForm {
@@ -64,6 +68,13 @@ struct State {
   int browseCategory = 0;             // ft::Category
   int listScroll = 0;                 // px, for list screens
   CustomForm custom;
+
+  // Today's Log / Past Days (guide Section 5)
+  uint32_t viewDay = 0;               // tracking day shown in DayLog; 0 = today
+  ft::Entry editEntry;                // working copy; written only on Save
+  float editOrigServings = 1;
+  Screen editReturn = Screen::DayLog;
+  uint32_t deleteArmedUntilMs = 0;    // second tap within 3 s confirms Delete
   // In-progress entry kept across a short sleep (guide Section 7): offer "Resume?"
   Screen resumeScreen = Screen::Home;
   uint32_t resumeUntilMs = 0;

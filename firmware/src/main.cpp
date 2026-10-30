@@ -99,8 +99,8 @@ void handleZones() {
       S.locked = false;
       actions::buzz(ft::VibePattern::Tick);
       app::showToast("Unlocked");
-    } else {
-      app::showToast("Today's Log arrives in Milestone 3");
+    } else if (!inputBlocked()) {
+      ui::openToday();
     }
   } else if (M5.BtnB.wasClicked()) {
     S.lastZoneEvent = "Middle tap";

@@ -20,6 +20,7 @@ void drag(int dy);
 // Navigation used by the touch zones and actions.
 void goHome();
 void openLogFood();
+void openToday();   // Today's Log
 // Called when the screen goes to sleep mid-task (keeps the entry for "Resume?").
 void onSleep();
 
