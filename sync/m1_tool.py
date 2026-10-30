@@ -1,9 +1,10 @@
 """Milestone 1 laptop tool: talk to the Core2 over USB.
 
-Usage (from the repo root):
+Usage (from the repo root; on Windows use `py` instead of `python`):
     pip install pyserial
     python sync/m1_tool.py hello
     python sync/m1_tool.py settime          # sets the device clock to this laptop's local time
+    python sync/m1_tool.py pushfoods        # validates data/foods.csv and sends it to the device
     python sync/m1_tool.py stats
     python sync/m1_tool.py --port COM5 stats
 
@@ -12,10 +13,13 @@ The full sync script (Milestone 5) replaces this.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 import time
+import zlib
 from datetime import datetime
+from pathlib import Path
 
 try:
     import serial
@@ -60,14 +64,54 @@ def request(s: serial.Serial, payload: dict, timeout: float = 3.0) -> dict:
             continue
         if msg.get("cmd") == payload["cmd"] or msg.get("ok") is False:
             return msg
-    sys.exit(f"No reply to {payload['cmd']!r} within {timeout:.0f} s. Is the Milestone 1 firmware flashed?")
+    sys.exit(f"No reply to {payload['cmd']!r} within {timeout:.0f} s. Is the latest firmware flashed and the serial monitor closed?")
+
+
+CHUNK = 384  # raw bytes per message (512 base64 chars)
+
+
+def compile_foods(csv_path: Path) -> bytes:
+    """Validates the CSV first; nothing is sent if it has errors."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from foods import compile_json, load_foods
+
+    foods, report = load_foods(csv_path)
+    for w in report.warnings:
+        print("warning:", w)
+    if not report.ok:
+        for e in report.errors:
+            print("ERROR:  ", e)
+        sys.exit(f"{len(report.errors)} error(s) in {csv_path}; nothing sent.")
+    data = json.dumps(compile_json(foods), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    print(f"{csv_path.name}: {len(foods)} foods, {len(data):,} bytes")
+    return data
+
+
+def push_foods(s: serial.Serial, data: bytes) -> dict:
+    r = request(s, {"cmd": "put_begin", "path": "foods.json", "size": len(data), "crc": zlib.crc32(data)})
+    if not r.get("ok"):
+        return r
+    for i in range(0, len(data), CHUNK):
+        chunk = base64.b64encode(data[i:i + CHUNK]).decode("ascii")
+        r = request(s, {"cmd": "put_chunk", "d": chunk})
+        if not r.get("ok"):
+            return r
+        print(f"\r  sent {min(i + CHUNK, len(data)):,} / {len(data):,} bytes", end="", flush=True)
+    print()
+    return request(s, {"cmd": "put_commit"}, timeout=15)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["hello", "settime", "time", "stats"])
+    ap.add_argument("command", choices=["hello", "settime", "time", "stats", "pushfoods"])
     ap.add_argument("--port", help="serial port, e.g. COM5 (auto-detected if omitted)")
+    ap.add_argument("--csv", default=str(Path(__file__).resolve().parent.parent / "data" / "foods.csv"),
+                    help="food database to push (default: data/foods.csv)")
     args = ap.parse_args()
+
+    payload = None
+    if args.command == "pushfoods":
+        payload = compile_foods(Path(args.csv))
 
     with open_port(args.port or find_port()) as s:
         if args.command == "hello":
@@ -83,6 +127,8 @@ def main() -> int:
                     print("Clock write did not stick:", check)
                     return 1
                 r = check
+        elif args.command == "pushfoods":
+            r = push_foods(s, payload)
         else:
             r = request(s, {"cmd": "stats"})
 

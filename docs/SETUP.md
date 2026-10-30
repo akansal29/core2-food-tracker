@@ -28,13 +28,19 @@ python sync/m1_tool.py stats
 ```
 The tool finds the Core2 automatically; if it can't, pass `--port COM5` (use the number Device Manager shows).
 
-## Check the food database
+## Check and push the food database
 
 ```
 python sync/foods.py data/foods.csv
 ```
-Prints `OK` or lists the rows to fix. Edit `data/foods.csv` in Excel or Google Sheets (save as CSV, keep the
-header row and column order).
+Prints `OK` or lists the rows to fix. Then send it to the Core2 (serial monitor closed):
+```
+python sync/m1_tool.py pushfoods
+```
+(On Windows use `py` instead of `python`. From the `firmware` folder, use `..\sync\...` paths.)
+
+It validates the file again, sends it, and prints the food count. Edit `data/foods.csv` in Excel or Google Sheets
+(save as CSV UTF-8, keep the header row and column order), then run `pushfoods` again.
 
 ## Laptop unit tests (optional)
 

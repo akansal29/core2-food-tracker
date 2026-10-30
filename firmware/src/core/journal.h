@@ -63,6 +63,7 @@ class Ledger {
   Totals totalsFor(uint32_t trackingDay) const;
   std::vector<const Entry*> entriesFor(uint32_t trackingDay) const;  // newest first
   size_t size() const { return entries_.size(); }
+  const std::vector<Entry>& all() const { return entries_; }
   uint32_t lastSeq() const { return lastSeq_; }
 
  private:

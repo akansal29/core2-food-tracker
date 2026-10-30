@@ -3,6 +3,7 @@
 
 #include "../../src/core/format.h"
 #include "../../src/core/journal.h"
+#include "../../src/core/nutrition.h"
 #include "../../src/core/timeutil.h"
 #include "../../src/core/vibe.h"
 
@@ -136,6 +137,92 @@ void test_vibe_patterns() {
   TEST_ASSERT_FALSE(v.isOn(600));
 }
 
+// ---- food model (guide Sections 3 and 4) ----
+static FoodDef plain(const char* id, const char* name, float kcal, float prot, uint16_t tags = 0) {
+  FoodDef f;
+  f.id = id; f.name = name; f.serving = "1"; f.kcal = kcal; f.protein = prot; f.tags = tags;
+  return f;
+}
+
+static FoodDb sampleDb() {
+  FoodDb db;
+  db.add(plain("milk", "Chocolate milk", 190, 8, kDrinkable));
+  db.add(plain("pb", "Peanut butter", 95, 3.5f));
+  db.add(plain("old", "Old bar", 200, 10));
+  FoodDef c = plain("combo", "Milk + PB", 999, 99, kComboTag);
+  c.ingredients = {{"milk", 1}, {"pb", 1}};
+  db.add(c);
+  FoodDef& old = const_cast<FoodDef&>(*db.find("old"));
+  old.archived = true;
+  return db;
+}
+
+void test_combo_computed_and_categories() {
+  FoodDb db = sampleDb();
+  TEST_ASSERT_TRUE(db.computeCombos());
+  const FoodDef* c = db.find("combo");
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 285, c->kcal);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 11.5, c->protein);
+  TEST_ASSERT_TRUE(categoryOf(*c) == Category::Meals);
+  TEST_ASSERT_TRUE(categoryOf(*db.find("milk")) == Category::Drinks);
+  TEST_ASSERT_TRUE(categoryOf(*db.find("pb")) == Category::Snacks);
+  TEST_ASSERT_EQUAL(1, db.inCategory(Category::Snacks).size());  // archived "old" hidden
+
+  Ingredients adj = {{"milk", 0.5f}, {"pb", 1}};
+  Amount a = ingredientsTotal(db, adj);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 190, a.kcal);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 7.5, a.protein);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 285, db.find("combo")->kcal);  // saved combo unchanged
+}
+
+void test_combo_bad_ingredient() {
+  FoodDb db;
+  FoodDef c = plain("c", "C", 0, 0);
+  c.ingredients = {{"missing", 1}};
+  db.add(c);
+  std::vector<std::string> problems;
+  TEST_ASSERT_FALSE(db.computeCombos(&problems));
+  TEST_ASSERT_EQUAL(1, problems.size());
+}
+
+void test_servings() {
+  TEST_ASSERT_FLOAT_WITHIN(0.001, 0.25, snapServings(0.1f));
+  TEST_ASSERT_FLOAT_WITHIN(0.001, 1.25, snapServings(1.3f));
+  TEST_ASSERT_FLOAT_WITHIN(0.001, 10, snapServings(12));
+  TEST_ASSERT_EQUAL_STRING("1 serving", servingsLabel(1).c_str());
+  TEST_ASSERT_EQUAL_STRING("0.5 servings", servingsLabel(0.5f).c_str());
+  TEST_ASSERT_EQUAL_STRING("1.25 servings", servingsLabel(1.25f).c_str());
+  TEST_ASSERT_EQUAL_STRING("2 servings", servingsLabel(2).c_str());
+  Amount a = scale(plain("x", "X", 190, 8), 0.75f);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 142.5, a.kcal);
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 6, a.protein);
+}
+
+void test_recents() {
+  FoodDb db = sampleDb();
+  Ledger L;
+  auto add = [&](uint32_t seq, const char* id, const char* food, int64_t ts, EntryKind k) {
+    Entry e; e.id = id; e.ts = ts; e.kind = k; e.foodId = food; e.name = food;
+    L.applyLine(encodeAdd(seq, e));
+  };
+  int64_t t = at(2026, 10, 21, 9, 0);
+  add(1, "a", "milk", t, EntryKind::Food);
+  add(2, "b", "pb", t + 60, EntryKind::Food);
+  add(3, "c", "milk", t + 120, EntryKind::Food);
+  add(4, "d", "", t + 180, EntryKind::Water);
+  add(5, "e", "old", t + 240, EntryKind::Food);   // archived: skipped
+  add(6, "f", "", t + 300, EntryKind::Custom);    // unsaved custom: skipped
+  add(7, "g", "combo", t + 360, EntryKind::Combo);
+  auto r = recentFoodIds(L, db, 5);
+  TEST_ASSERT_EQUAL(3, r.size());
+  TEST_ASSERT_EQUAL_STRING("combo", r[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("milk", r[1].c_str());
+  TEST_ASSERT_EQUAL_STRING("pb", r[2].c_str());
+  TEST_ASSERT_EQUAL(2, recentFoodIds(L, db, 2).size());
+  TEST_ASSERT_EQUAL(0, parseTag("crunchy"));
+  TEST_ASSERT_EQUAL(kDrinkable, parseTag("drinkable"));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tracking_day_boundary);
@@ -147,5 +234,9 @@ int main(int, char**) {
   RUN_TEST(test_entries_newest_first);
   RUN_TEST(test_format);
   RUN_TEST(test_vibe_patterns);
+  RUN_TEST(test_combo_computed_and_categories);
+  RUN_TEST(test_combo_bad_ingredient);
+  RUN_TEST(test_servings);
+  RUN_TEST(test_recents);
   return UNITY_END();
 }

@@ -1,15 +1,16 @@
-// Shared application state for the Milestone 1 firmware.
+// Shared application state.
 #pragma once
 #include <Arduino.h>
 
 #include <string>
 
 #include "core/journal.h"
+#include "core/nutrition.h"
 #include "core/vibe.h"
 
 namespace app {
 
-constexpr const char* kFirmwareVersion = "0.1.0-m1";
+constexpr const char* kFirmwareVersion = "0.2.0-m2";
 constexpr int kSchemaVersion = 1;
 
 struct Settings {
@@ -23,7 +24,15 @@ struct Settings {
   uint32_t saveCounter = 0;    // M1 test: proves atomic settings writes survive reboot
 };
 
-enum class Screen { Home, Diagnostics, Reminder };
+enum class Screen { Home, LogFood, Browse, Picker, ComboAdjust, Custom, Diagnostics, Reminder };
+
+// Custom entry form (guide Section 4)
+struct CustomForm {
+  String kcal;
+  String protein;
+  int field = 0;       // 0 = calories, 1 = protein
+  bool saveAsFood = false;
+};
 
 struct State {
   Settings settings;
@@ -36,12 +45,29 @@ struct State {
   bool storageOk = true;
   uint32_t lastInteractionMs = 0;
   uint32_t journalBadLines = 0;
-  // Undo: last entry written and when (5 s window).
+
+  // After-log banner on Home: "Logged! ..." with Undo / Log another (5 s).
   std::string undoId;
   uint32_t undoUntilMs = 0;
+  String bannerText;
+
   // Toast message
   String toast;
   uint32_t toastUntilMs = 0;
+
+  // Logging flow
+  std::string pickerFoodId;
+  float pickerServings = 1;
+  bool comboAdjusted = false;
+  ft::Ingredients comboIngredients;   // per-entry copy, never written back to the saved combo
+  Screen pickerReturn = Screen::LogFood;
+  int browseCategory = 0;             // ft::Category
+  int listScroll = 0;                 // px, for list screens
+  CustomForm custom;
+  // In-progress entry kept across a short sleep (guide Section 7): offer "Resume?"
+  Screen resumeScreen = Screen::Home;
+  uint32_t resumeUntilMs = 0;
+
   // M1 reminder test (0 = none scheduled)
   uint32_t testReminderAtMs = 0;
   // Diagnostics

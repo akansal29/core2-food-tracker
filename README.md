@@ -3,15 +3,15 @@
 A pocket M5Stack Core2 (v1.3) that tracks calories, protein, and water, with fast logging and gentle
 reminders. The implementation guide (Claude Docs) is the single source of truth for behavior.
 
-**Status:** Milestone 1, hardware proof of concept.
+**Status:** Milestone 2, food logging. (Milestone 1 hardware checks passed.)
 
 | Folder | What's in it |
 | --- | --- |
 | `firmware/` | PlatformIO project. `src/core/` is hardware-free logic (tested on the laptop); the rest talks to the device. |
-| `sync/` | `foods.py` validates and compiles the food database; `m1_tool.py` sets the clock and reads stats over USB. |
+| `sync/` | `foods.py` validates and compiles the food database; `m1_tool.py` sets the clock, pushes the food list (`pushfoods`), and reads stats over USB. |
 | `data/foods.csv` | The food database you edit in a spreadsheet (48 starter foods). |
 | `tests/` | Python tests (`python -m pytest tests`). C++ tests live in `firmware/test/`. |
-| `docs/` | `SETUP.md` (Windows + VS Code), `M1_CHECKLIST.md` (what to test on the device). |
+| `docs/` | `SETUP.md` (Windows + VS Code), `M1_CHECKLIST.md` and `M2_CHECKLIST.md` (what to test on the device). |
 
 Start with `docs/SETUP.md`.
 
@@ -20,3 +20,10 @@ Start with `docs/SETUP.md`.
 Display and touch zones, vibration patterns, screen sleep/wake with auto-lock, a test reminder that wakes the
 screen, an append-only journal on flash with checksums, atomic settings writes, battery display and low-battery
 shutdown, RTC clock and the 3 AM tracking day, and USB commands `hello`, `time_get`, `time_set`, `stats`.
+
+## Milestone 2 scope
+
+Food list pushed over USB (validated, checksummed, swapped in atomically with the previous copy kept), Log Food
+screen with favorites and recents, Browse by Snacks / Drinks / Meals, serving picker (1/4 steps, live preview),
+combos with per-entry ingredient adjustments, long-press instant logging, Undo / Log another banner, custom entry
+with optional save as food, "Resume?" after the screen sleeps mid-entry, and scrolling lists.

@@ -2,11 +2,14 @@
 
 #include <ArduinoJson.h>
 #include <M5Unified.h>
+#include <mbedtls/base64.h>
 
 #include "app.h"
 #include "core/timeutil.h"
+#include "food_store.h"
 #include "rtc.h"
 #include "storage.h"
+#include "ui.h"
 
 using app::S;
 
@@ -14,9 +17,11 @@ namespace serial_cmd {
 
 namespace {
 
-char buf[512];
+char buf[1200];
 size_t len = 0;
 bool overflow = false;
+bool syncing = false;
+uint32_t lastSyncMsgMs = 0;
 
 void reply(JsonDocument& doc) {
   serializeJson(doc, Serial);
@@ -67,10 +72,40 @@ void handle(const char* line) {
     out["journal_bytes"] = (unsigned)storage::journalBytes();
     out["flash_used"] = (unsigned)storage::usedBytes();
     out["flash_total"] = (unsigned)storage::totalBytes();
+    out["foods"] = (unsigned)foods::db().all().size();
     out["battery"] = M5.Power.getBatteryLevel();
     out["battery_mv"] = M5.Power.getBatteryVoltage();
     out["uptime_s"] = (millis() - S.bootMs) / 1000;
     out["saves"] = S.settings.saveCounter;
+  } else if (!strcmp(cmd, "put_begin")) {
+    const char* path = in["path"] | "";
+    if (strcmp(path, "foods.json") != 0) return error("only foods.json can be pushed");
+    String err;
+    if (!foods::stageBegin(in["size"] | 0u, in["crc"] | 0u, err)) return error(err.c_str());
+    syncing = true;
+    lastSyncMsgMs = millis();
+    app::showToast("Syncing food list...", 60000);
+  } else if (!strcmp(cmd, "put_chunk")) {
+    const char* b64 = in["d"] | "";
+    uint8_t data[768];
+    size_t n = 0;
+    if (mbedtls_base64_decode(data, sizeof(data), &n, reinterpret_cast<const unsigned char*>(b64), strlen(b64)) != 0)
+      return error("bad base64");
+    String err;
+    if (!foods::stageChunk(data, n, err)) return error(err.c_str());
+    lastSyncMsgMs = millis();
+    out["n"] = (unsigned)n;
+  } else if (!strcmp(cmd, "put_commit")) {
+    String err;
+    int count = 0;
+    syncing = false;
+    if (!foods::stageCommit(err, count)) {
+      app::showToast("Food list rejected; old list kept", 4000);
+      return error(err.c_str());
+    }
+    out["foods"] = count;
+    app::showToast(("Food list updated: " + std::to_string(count) + " foods").c_str(), 4000);
+    ui::requestRedraw();
   } else {
     return error("unknown cmd");
   }
@@ -95,6 +130,13 @@ void poll() {
       overflow = true;
     }
   }
+  // An abandoned upload (cable pulled) stops showing "Syncing" after 10 s.
+  if (syncing && millis() - lastSyncMsgMs > 10000) {
+    syncing = false;
+    app::showToast("Sync interrupted; old list kept", 3000);
+  }
 }
+
+bool isSyncing() { return syncing; }
 
 }  // namespace serial_cmd
