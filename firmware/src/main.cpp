@@ -209,6 +209,9 @@ void checkBattery() {
 }  // namespace
 
 void setup() {
+  // Must come before Serial.begin (inside M5.begin). The default 256-byte buffer
+  // overflows while the screen redraws and silently drops incoming bytes.
+  Serial.setRxBufferSize(4096);
   auto cfg = M5.config();
   cfg.serial_baudrate = 115200;
   M5.begin(cfg);

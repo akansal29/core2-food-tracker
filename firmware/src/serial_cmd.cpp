@@ -92,7 +92,7 @@ void handle(const char* line) {
     if (mbedtls_base64_decode(data, sizeof(data), &n, reinterpret_cast<const unsigned char*>(b64), strlen(b64)) != 0)
       return error("bad base64");
     String err;
-    if (!foods::stageChunk(data, n, err)) return error(err.c_str());
+    if (!foods::stageChunk(data, n, in["o"] | 0u, in["c"] | 0u, err)) return error(err.c_str());
     lastSyncMsgMs = millis();
     out["n"] = (unsigned)n;
   } else if (!strcmp(cmd, "put_commit")) {

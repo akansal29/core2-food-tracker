@@ -27,7 +27,7 @@ std::string saveCustom(const String& name, float kcal, float protein, int64_t no
 
 // USB push of foods.json: staged, CRC-checked, validated, then swapped in atomically.
 bool stageBegin(size_t size, uint32_t crc, String& err);
-bool stageChunk(const uint8_t* data, size_t len, String& err);
+bool stageChunk(const uint8_t* data, size_t len, size_t offset, uint32_t chunkCrc, String& err);
 bool stageCommit(String& err, int& foodCount);
 
 }  // namespace foods

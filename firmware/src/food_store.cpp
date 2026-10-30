@@ -246,9 +246,18 @@ bool stageBegin(size_t size, uint32_t crc, String& err) {
   return true;
 }
 
-bool stageChunk(const uint8_t* data, size_t len, String& err) {
+bool stageChunk(const uint8_t* data, size_t len, size_t offset, uint32_t chunkCrc, String& err) {
   if (!gStage) {
     err = "no upload in progress";
+    return false;
+  }
+  // A damaged or out-of-order chunk is refused before anything is written, so the laptop can resend it.
+  if (ft::crc32(reinterpret_cast<const char*>(data), len) != chunkCrc) {
+    err = "chunk damaged";
+    return false;
+  }
+  if (offset != gStageWritten) {
+    err = "chunk out of order";
     return false;
   }
   if (gStageWritten + len > gStageExpected) {
@@ -273,7 +282,8 @@ bool stageCommit(String& err, int& foodCount) {
   gStage.close();
   if (gStageWritten != gStageExpected || gStageCrc != gStageCrcExpected) {
     LittleFS.remove(kStaging);
-    err = "checksum mismatch; nothing changed";
+    err = "checksum mismatch (got " + String((unsigned)gStageWritten) + " of " + String((unsigned)gStageExpected) +
+          " bytes); nothing changed";
     return false;
   }
   // Validate before swapping anything.

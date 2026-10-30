@@ -10,7 +10,7 @@
 
 namespace app {
 
-constexpr const char* kFirmwareVersion = "0.2.0-m2";
+constexpr const char* kFirmwareVersion = "0.2.1-m2";
 constexpr int kSchemaVersion = 1;
 
 struct Settings {

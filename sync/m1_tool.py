@@ -67,7 +67,8 @@ def request(s: serial.Serial, payload: dict, timeout: float = 3.0) -> dict:
     sys.exit(f"No reply to {payload['cmd']!r} within {timeout:.0f} s. Is the latest firmware flashed and the serial monitor closed?")
 
 
-CHUNK = 384  # raw bytes per message (512 base64 chars)
+CHUNK = 192  # raw bytes per message (256 base64 chars); small so a busy device never drops bytes
+RETRIES = 5
 
 
 def compile_foods(csv_path: Path) -> bytes:
@@ -92,8 +93,13 @@ def push_foods(s: serial.Serial, data: bytes) -> dict:
     if not r.get("ok"):
         return r
     for i in range(0, len(data), CHUNK):
-        chunk = base64.b64encode(data[i:i + CHUNK]).decode("ascii")
-        r = request(s, {"cmd": "put_chunk", "d": chunk})
+        part = data[i:i + CHUNK]
+        msg = {"cmd": "put_chunk", "o": i, "c": zlib.crc32(part), "d": base64.b64encode(part).decode("ascii")}
+        for attempt in range(RETRIES):
+            r = request(s, msg)
+            if r.get("ok") or r.get("error") != "chunk damaged":
+                break
+            time.sleep(0.05)  # the device refused a garbled chunk without writing it; send it again
         if not r.get("ok"):
             return r
         print(f"\r  sent {min(i + CHUNK, len(data)):,} / {len(data):,} bytes", end="", flush=True)
