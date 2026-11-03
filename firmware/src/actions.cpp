@@ -6,6 +6,7 @@
 #include "core/format.h"
 #include "core/timeutil.h"
 #include "food_store.h"
+#include "reminder_engine.h"
 #include "storage.h"
 
 using app::S;
@@ -43,6 +44,8 @@ bool commitEntry(ft::Entry e, bool isWater) {
   e.ts = now;
   e.id = ft::makeEntryId(now, seq);
   if (!commitLine(ft::encodeAdd(seq, e))) return false;
+  if (isWater) remind::waterLogged();
+  else remind::foodLogged(e.ts);
   S.undoId = e.id;
   S.undoUntilMs = millis() + kUndoWindowMs;
   S.bannerText = (isWater ? String("") : String("Logged! ")) + amountText(e.kcal, e.protein, e.waterOz);

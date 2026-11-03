@@ -10,7 +10,7 @@
 
 namespace app {
 
-constexpr const char* kFirmwareVersion = "0.3.0-m3";
+constexpr const char* kFirmwareVersion = "0.4.0-m4";
 constexpr int kSchemaVersion = 1;
 
 struct Settings {
@@ -22,12 +22,22 @@ struct Settings {
   int screenTimeoutSec = 30;
   bool vibration = true;
   uint32_t saveCounter = 0;    // M1 test: proves atomic settings writes survive reboot
+  // Reminders (guide Section 2). Times are minutes after midnight; windows may cross midnight.
+  bool eatingReminders = true;
+  bool waterReminders = true;
+  int eatStartMin = 11 * 60;   // 11:00 AM
+  int eatEndMin = 30;          // 12:30 AM
+  int eatIntervalMin = 150;
+  int waterStartMin = 11 * 60; // 11:00 AM
+  int waterEndMin = 60;        // 1:00 AM
+  int waterIntervalMin = 20;
+  int64_t dndUntil = 0;        // local seconds; ft::kForever = until turned off; kept across restarts
 };
 
 enum class Screen {
   Home, LogFood, Browse, Favorites, Picker, ComboAdjust, Custom,
   DayLog, PastDays, EntryEdit,
-  Diagnostics, Reminder
+  SettingsMenu, Reminders, Diagnostics, Reminder
 };
 
 // Custom entry form (guide Section 4)
@@ -79,7 +89,11 @@ struct State {
   Screen resumeScreen = Screen::Home;
   uint32_t resumeUntilMs = 0;
 
-  // M1 reminder test (0 = none scheduled)
+  // Reminder overlay (guide Section 2)
+  uint8_t reminderDue = 0;            // ft::Due being shown
+  bool reminderEatOpen = false;       // eating half not answered yet
+  bool reminderWaterOpen = false;     // water half not answered yet
+  // Hardware test reminder (0 = none scheduled)
   uint32_t testReminderAtMs = 0;
   // Diagnostics
   String lastZoneEvent = "none yet";

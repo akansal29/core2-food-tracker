@@ -3,7 +3,7 @@
 A pocket M5Stack Core2 (v1.3) that tracks calories, protein, and water, with fast logging and gentle
 reminders. The implementation guide (Claude Docs) is the single source of truth for behavior.
 
-**Status:** Milestone 3, Today's Log and history. (Milestones 1 and 2 passed on the device.)
+**Status:** Milestone 4, reminders and Do Not Disturb. (Milestones 1–3 passed on the device.)
 
 | Folder | What's in it |
 | --- | --- |
@@ -11,7 +11,7 @@ reminders. The implementation guide (Claude Docs) is the single source of truth 
 | `sync/` | `foods.py` validates and compiles the food database; `m1_tool.py` sets the clock, pushes the food list (`pushfoods`), and reads stats over USB. |
 | `data/foods.csv` | The food database you edit in a spreadsheet (48 starter foods). |
 | `tests/` | Python tests (`python -m pytest tests`). C++ tests live in `firmware/test/`. |
-| `docs/` | `SETUP.md` (Windows + VS Code), `M1`–`M3_CHECKLIST.md` (what to test on the device). |
+| `docs/` | `SETUP.md` (Windows + VS Code), `M1`–`M4_CHECKLIST.md` (what to test on the device). |
 
 Start with `docs/SETUP.md`.
 
@@ -34,3 +34,11 @@ Today's Log (Today button or hold the middle circle) with totals, remaining amou
 entry to change servings or water amount, shift its time (moving it across the 3 AM boundary when needed, never into
 the future), or delete it with a two-tap confirm. Past Days lists every logged day with totals and opens each day's
 editable log. Edits rescale the entry's own logged snapshot, so food-list changes never rewrite history.
+
+## Milestone 4 scope
+
+Eating reminders (11 AM–12:30 AM, about every 2.5 h, pushed back by any food log, repeat once if ignored, one gentle
+extra nudge per day when behind pace) and water sip reminders (11 AM–1 AM, every 20 min, never repeated, stop at the
+daily goal). Alerts due within 5 minutes merge into one, each type has its own vibration pattern, and reminders wait
+while you're mid-task. Do Not Disturb (1 h / 2 h / 3 h / until off) survives restarts and never replays missed
+reminders. The scheduler is hardware-free and unit-tested, including windows that cross midnight.

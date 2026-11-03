@@ -72,6 +72,15 @@ bool saveSettings(const app::Settings& s) {
   doc["timeout"] = s.screenTimeoutSec;
   doc["vibe"] = s.vibration;
   doc["saves"] = s.saveCounter;
+  doc["eat_on"] = s.eatingReminders;
+  doc["water_on"] = s.waterReminders;
+  doc["eat_start"] = s.eatStartMin;
+  doc["eat_end"] = s.eatEndMin;
+  doc["eat_every"] = s.eatIntervalMin;
+  doc["water_start"] = s.waterStartMin;
+  doc["water_end"] = s.waterEndMin;
+  doc["water_every"] = s.waterIntervalMin;
+  doc["dnd"] = s.dndUntil;
   std::string out;
   serializeJson(doc, out);
   return writeFileAtomic(kSettings, out);
@@ -95,6 +104,15 @@ bool loadSettings(app::Settings& s) {
   s.screenTimeoutSec = doc["timeout"] | s.screenTimeoutSec;
   s.vibration = doc["vibe"] | s.vibration;
   s.saveCounter = doc["saves"] | s.saveCounter;
+  s.eatingReminders = doc["eat_on"] | s.eatingReminders;
+  s.waterReminders = doc["water_on"] | s.waterReminders;
+  s.eatStartMin = doc["eat_start"] | s.eatStartMin;
+  s.eatEndMin = doc["eat_end"] | s.eatEndMin;
+  s.eatIntervalMin = doc["eat_every"] | s.eatIntervalMin;
+  s.waterStartMin = doc["water_start"] | s.waterStartMin;
+  s.waterEndMin = doc["water_end"] | s.waterEndMin;
+  s.waterIntervalMin = doc["water_every"] | s.waterIntervalMin;
+  s.dndUntil = doc["dnd"] | s.dndUntil;
   return true;
 }
 

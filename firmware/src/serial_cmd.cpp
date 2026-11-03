@@ -7,6 +7,7 @@
 #include "app.h"
 #include "core/timeutil.h"
 #include "food_store.h"
+#include "reminder_engine.h"
 #include "rtc.h"
 #include "storage.h"
 #include "ui.h"
@@ -65,6 +66,7 @@ void handle(const char* line) {
     ft::CivilTime t{y, (uint8_t)mo, (uint8_t)d, (uint8_t)h, (uint8_t)mi, (uint8_t)s};
     if (!ft::isPlausible(t)) return error("implausible time");
     if (!rtc::set(t)) return error("rtc write failed");
+    remind::clockChanged();
     out["t"] = ts;
   } else if (!strcmp(cmd, "stats")) {
     out["entries"] = (unsigned)S.ledger.size();

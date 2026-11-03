@@ -5,6 +5,7 @@
 #include "../../src/core/history.h"
 #include "../../src/core/journal.h"
 #include "../../src/core/nutrition.h"
+#include "../../src/core/reminders.h"
 #include "../../src/core/timeutil.h"
 #include "../../src/core/vibe.h"
 
@@ -262,6 +263,131 @@ void test_shift_time_and_remaining() {
   TEST_ASSERT_EQUAL_STRING("Both targets reached", remainingText(3000, 3000, 100, 100).c_str());
 }
 
+// ---- reminders (guide Section 2) ----
+static ReminderInputs inputsAt(int64_t now, float kcal = 0, float water = 0) {
+  ReminderInputs in;
+  in.now = now; in.kcal = kcal; in.waterOz = water;
+  return in;
+}
+
+void test_windows_cross_midnight() {
+  ReminderConfig c;
+  TEST_ASSERT_FALSE(inWindow(c.water, at(2026, 11, 2, 10, 59)));
+  TEST_ASSERT_TRUE(inWindow(c.water, at(2026, 11, 2, 11, 0)));
+  TEST_ASSERT_TRUE(inWindow(c.water, at(2026, 11, 3, 0, 45)));   // after midnight, still in
+  TEST_ASSERT_FALSE(inWindow(c.water, at(2026, 11, 3, 1, 0)));   // 1:00 AM end is exclusive
+  TEST_ASSERT_FALSE(inWindow(c.eat, at(2026, 11, 3, 0, 31)));    // eating ends 12:30 AM
+  // 2 AM clamps to 11 AM the same calendar day (next tracking day)
+  TEST_ASSERT_TRUE(clampToWindow(c.water, at(2026, 11, 3, 2, 0)) == at(2026, 11, 3, 11, 0));
+  // 8 AM clamps to 11 AM the same day
+  TEST_ASSERT_TRUE(clampToWindow(c.water, at(2026, 11, 3, 8, 0)) == at(2026, 11, 3, 11, 0));
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 0.0, windowFraction(c.eat, at(2026, 11, 2, 10, 0)));
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 1.0, windowFraction(c.eat, at(2026, 11, 3, 1, 0)));
+  // 11:00 -> 00:30 is 810 min; 5:45 PM is 405 min in = 0.5
+  TEST_ASSERT_FLOAT_WITHIN(0.01, 0.5, windowFraction(c.eat, at(2026, 11, 2, 17, 45)));
+}
+
+void test_eat_interval_and_food_log() {
+  ReminderConfig c;
+  ReminderScheduler r;
+  int64_t t0 = at(2026, 11, 2, 12, 0);
+  r.reset(c, t0, at(2026, 11, 2, 11, 30));            // ate at 11:30 -> next 2:00 PM
+  TEST_ASSERT_TRUE(r.nextEat() == at(2026, 11, 2, 14, 0));
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(at(2026, 11, 2, 13, 59), 1000, 40)) == Due::None);
+  r.foodLogged(c, at(2026, 11, 2, 13, 30));           // ate again -> pushed to 4:00 PM
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(at(2026, 11, 2, 14, 5), 1000, 40)) == Due::None);
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(at(2026, 11, 2, 16, 0), 1500, 40)) == Due::Eat);
+  // waits for an answer: nothing else fires
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(at(2026, 11, 2, 16, 1), 1500, 40)) == Due::None);
+}
+
+void test_ignored_eat_repeats_once_and_snooze_skip() {
+  ReminderConfig c;
+  ReminderScheduler r;
+  int64_t t = at(2026, 11, 2, 14, 0);
+  r.reset(c, t - 3 * 3600, t - c.eatIntervalMin * 60);
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t, 1500, 40)) == Due::Eat);
+  r.ignoreEat(c, t);
+  TEST_ASSERT_TRUE(r.nextEat() == t + 15 * 60);       // repeat once after 15 min
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t + 15 * 60, 1500, 40)) == Due::Eat);
+  r.ignoreEat(c, t + 15 * 60);
+  TEST_ASSERT_TRUE(r.nextEat() == t + 15 * 60 + c.eatIntervalMin * 60);  // then the normal interval
+  int64_t t2 = r.nextEat();
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t2, 1500, 40)) == Due::Eat);
+  r.snoozeEat(c, t2);
+  TEST_ASSERT_TRUE(r.nextEat() == t2 + 15 * 60);
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t2 + 15 * 60, 1500, 40)) == Due::Eat);
+  r.skipEat(c, t2 + 15 * 60);
+  TEST_ASSERT_TRUE(r.nextEat() == t2 + 15 * 60 + c.eatIntervalMin * 60);
+}
+
+void test_water_never_repeats_and_stops_at_goal() {
+  ReminderConfig c;
+  c.eatingOn = false;
+  ReminderScheduler r;
+  int64_t t = at(2026, 11, 2, 12, 0);
+  r.reset(c, t, 0);
+  TEST_ASSERT_TRUE(r.nextWater() == t + 20 * 60);
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t + 20 * 60, 0, 10)) == Due::Water);
+  r.ignoreWater(c, t + 20 * 60);
+  TEST_ASSERT_TRUE(r.nextWater() == t + 40 * 60);     // just the next interval
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t + 40 * 60, 0, 40)) == Due::None);  // 40/40 oz reached
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t + 61 * 60, 0, 38)) == Due::Water);  // corrected below goal: resumes
+  r.waterLogged(c, t + 61 * 60);
+  TEST_ASSERT_TRUE(r.nextWater() == t + 81 * 60);
+  // last water reminder of the night is before 1:00 AM; next one is 11 AM
+  r.reset(c, at(2026, 11, 3, 0, 50), 0);
+  TEST_ASSERT_TRUE(r.nextWater() == at(2026, 11, 3, 11, 0));
+}
+
+void test_combined_alert() {
+  ReminderConfig c;
+  ReminderScheduler r;
+  int64_t t = at(2026, 11, 2, 15, 0);
+  r.reset(c, t - 3600, t - c.eatIntervalMin * 60);   // eat due at t
+  r.waterLogged(c, t - 17 * 60);                     // water due at t + 3 min
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t, 1500, 10)) == Due::Both);
+  TEST_ASSERT_TRUE(r.eatPending() && r.waterPending());
+  r.foodLogged(c, t);
+  r.waterLogged(c, t);
+  TEST_ASSERT_FALSE(r.eatPending() || r.waterPending());
+}
+
+void test_dnd_blocks_and_does_not_pile_up() {
+  ReminderConfig c;
+  ReminderScheduler r;
+  int64_t t = at(2026, 11, 2, 13, 0);
+  r.reset(c, t, t - 2 * 3600);  // eat due soon
+  r.setDnd(t + 2 * 3600);       // 2-hour exam
+  for (int m = 0; m < 120; m += 5) TEST_ASSERT_TRUE(r.check(c, inputsAt(t + m * 60, 500, 0)) == Due::None);
+  // after DND: one eating reminder 10 min later, water on its normal interval, no backlog
+  int64_t end = t + 2 * 3600;
+  TEST_ASSERT_TRUE(r.nextEat() == end + 10 * 60);
+  TEST_ASSERT_TRUE(r.nextWater() == end + 20 * 60);
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(end + 10 * 60, 500, 0)) == Due::Eat);
+  // DND until turned off
+  ReminderScheduler f;
+  f.reset(c, t, 0);
+  f.setDnd(kForever);
+  for (int h = 0; h < 10; ++h) TEST_ASSERT_TRUE(f.check(c, inputsAt(t + h * 3600, 0, 0)) == Due::None);
+  f.setDnd(0);
+  TEST_ASSERT_FALSE(f.dndActive(t + 11 * 3600));
+}
+
+void test_behind_pace_nudge_once_per_day() {
+  ReminderConfig c;
+  c.waterOn = false;
+  ReminderScheduler r;
+  int64_t t = at(2026, 11, 2, 18, 0);   // > 40% through the window
+  r.reset(c, t, t - 10 * 60);           // just ate, next eat is 2.5 h away
+  TEST_ASSERT_TRUE(behindPace(c.eat, t, 300, 3000));
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t, 300)) == Due::Eat);
+  TEST_ASSERT_TRUE(r.lastWasBehindNudge());
+  r.skipEat(c, t);
+  TEST_ASSERT_TRUE(r.check(c, inputsAt(t + 60, 300)) == Due::None);  // not again today
+  TEST_ASSERT_FALSE(behindPace(c.eat, t, 1500, 3000));               // on pace: no nudge
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tracking_day_boundary);
@@ -280,5 +406,12 @@ int main(int, char**) {
   RUN_TEST(test_logged_days_and_labels);
   RUN_TEST(test_rescale_uses_snapshot);
   RUN_TEST(test_shift_time_and_remaining);
+  RUN_TEST(test_windows_cross_midnight);
+  RUN_TEST(test_eat_interval_and_food_log);
+  RUN_TEST(test_ignored_eat_repeats_once_and_snooze_skip);
+  RUN_TEST(test_water_never_repeats_and_stops_at_goal);
+  RUN_TEST(test_combined_alert);
+  RUN_TEST(test_dnd_blocks_and_does_not_pile_up);
+  RUN_TEST(test_behind_pace_nudge_once_per_day);
   return UNITY_END();
 }

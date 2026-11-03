@@ -1,11 +1,12 @@
-// Core2 food tracker — Milestone 2: food logging.
-// See docs/M2_CHECKLIST.md for what to test on the device.
+// Core2 food tracker.
+// See docs/M*_CHECKLIST.md for what to test on the device.
 #include <M5Unified.h>
 
 #include "actions.h"
 #include "app.h"
 #include "core/timeutil.h"
 #include "food_store.h"
+#include "reminder_engine.h"
 #include "rtc.h"
 #include "serial_cmd.h"
 #include "storage.h"
@@ -171,13 +172,30 @@ void handleTouch() {
   }
 }
 
-void checkReminder() {
-  if (!S.testReminderAtMs || millis() < S.testReminderAtMs) return;
-  S.testReminderAtMs = 0;
+void showReminder(ft::Due d) {
   screenOn();  // wakes the display even if it was asleep
+  S.reminderDue = static_cast<uint8_t>(d);
+  S.reminderEatOpen = d == ft::Due::Eat || d == ft::Due::Both;
+  S.reminderWaterOpen = d == ft::Due::Water || d == ft::Due::Both;
   S.screen = app::Screen::Reminder;
-  actions::buzz(ft::VibePattern::Water);
+  app::markInteraction();  // full screen-timeout from now
+  actions::buzz(d == ft::Due::Both    ? ft::VibePattern::Combined
+                : d == ft::Due::Eat   ? ft::VibePattern::Eating
+                                      : ft::VibePattern::Water);
   ui::requestRedraw();
+}
+
+void checkReminders() {
+  if (S.testReminderAtMs && millis() >= S.testReminderAtMs) {  // hardware-test button
+    S.testReminderAtMs = 0;
+    showReminder(ft::Due::Both);
+    return;
+  }
+  static uint32_t lastPollMs = 0;
+  if (millis() - lastPollMs < 1000) return;
+  lastPollMs = millis();
+  ft::Due d = remind::poll();
+  if (d != ft::Due::None) showReminder(d);
 }
 
 void checkBattery() {
@@ -246,7 +264,7 @@ void loop() {
   setMotor(S.vibe.isOn(millis()));
   handleZones();
   handleTouch();
-  checkReminder();
+  checkReminders();
   checkBattery();
 
   if (S.screenOn && millis() - S.lastInteractionMs > (uint32_t)S.settings.screenTimeoutSec * 1000 &&

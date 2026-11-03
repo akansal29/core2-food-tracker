@@ -12,6 +12,7 @@
 #include "core/nutrition.h"
 #include "core/timeutil.h"
 #include "food_store.h"
+#include "reminder_engine.h"
 #include "storage.h"
 
 using app::S;
@@ -202,6 +203,11 @@ void statusBar() {
     canvas.setTextColor(cWarn);
     canvas.drawString("Clock not set", 6, 3);
   }
+  if (remind::dndActive()) {
+    canvas.setTextColor(cWarn);
+    canvas.setTextDatum(top_left);
+    canvas.drawString("DND", 98, 3);
+  }
   if (S.locked) {
     canvas.drawRoundRect(150, 4, 12, 9, 3, cMuted);
     canvas.fillRoundRect(147, 10, 18, 11, 2, cMuted);
@@ -265,16 +271,17 @@ void drawHome() {
       canvas.setTextColor(cMuted);
       long secs = (long)(S.testReminderAtMs - millis()) / 1000;
       canvas.drawString(("Test reminder in " + std::to_string(secs < 0 ? 0 : secs) + " s").c_str(), 8, 154);
-    } else if (t.lastFoodTs > 0) {
-      ft::CivilTime c = ft::fromLocalSeconds(t.lastFoodTs);
-      canvas.setTextColor(cMuted);
-      canvas.drawString(("Last food " + ft::clock12(c.hour, c.minute)).c_str(), 8, 154);
+    } else {
+      std::string next = remind::nextText();
+      canvas.setTextColor(remind::dndActive() ? cWarn : cMuted);
+      canvas.drawString(fit(next, 304).c_str(), 8, 154);
+      if (!S.locked) addHit({0, 148, 320, 26}, [] { S.screen = Screen::Reminders; });
     }
     bool en = !S.locked;
     button({4, 178, 74, 36}, "Today", [] { openToday(); }, 0, en);
     button({82, 178, 74, 36}, "Ideas", [] { app::showToast("Suggestions arrive in Milestone 6"); }, 0, en);
     button({160, 178, 74, 36}, "Trends", [] { app::showToast("Trends arrive in Milestone 6"); }, 0, en);
-    button({238, 178, 78, 36}, "Settings", [] { S.screen = Screen::Diagnostics; }, 0, en);
+    button({238, 178, 78, 36}, "Settings", [] { S.screen = Screen::SettingsMenu; }, 0, en);
   }
 }
 
@@ -860,17 +867,172 @@ void drawDiagnostics() {
   });
 }
 
-void drawReminder() {
-  canvas.setFont(&fonts::FreeSansBold12pt7b);
-  canvas.setTextColor(cWater);
-  canvas.setTextDatum(top_center);
-  canvas.drawString("Quick water check.", 160, 40);
+// ---------- Reminders (guide Section 2) ----------
+
+void closeReminderIfDone() {
+  if (!S.reminderEatOpen && !S.reminderWaterOpen) goHome();
+}
+
+void eatAnswered() {
+  S.reminderEatOpen = false;
+  closeReminderIfDone();
+}
+
+void waterAnswered() {
+  S.reminderWaterOpen = false;
+  closeReminderIfDone();
+}
+
+void sip(float oz) {
+  actions::addWater(oz);     // resolves the water reminder and reschedules it
+  S.reminderWaterOpen = false;
+  if (S.reminderEatOpen) S.screen = Screen::Reminder;  // stay for the eating half
+  else goHome();
+}
+
+void openFoodFromReminder(const std::string& id) {
+  remind::eatSnooze();       // if they log, the food log reschedules properly
+  S.reminderEatOpen = false;
+  if (S.reminderWaterOpen) remind::leaveOverlay();
+  S.reminderWaterOpen = false;
+  S.locked = false;          // a labeled reminder button is a deliberate tap
+  if (id.empty()) {
+    openLogFood();
+    return;
+  }
+  S.pickerFoodId = id;
+  S.pickerServings = 1;
+  S.comboAdjusted = false;
+  S.comboIngredients.clear();
+  S.pickerReturn = Screen::LogFood;
+  S.screen = Screen::Picker;
+}
+
+void suggestionBox(Rect r) {
+  const ft::FoodDef* f = foods::db().find(remind::suggestion());
+  canvas.fillRoundRect(r.x, r.y, r.w, r.h, 6, cButton);
+  canvas.setTextDatum(top_left);
+  if (!f) {
+    canvas.setFont(&fonts::FreeSans9pt7b);
+    canvas.setTextColor(cMuted);
+    canvas.drawString("Star a few foods to get snack ideas here.", r.x + 8, r.y + 8);
+    return;
+  }
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextColor(cText);
+  canvas.drawString(fit("Idea: " + f->name, r.w - 70).c_str(), r.x + 8, r.y + 4);
   canvas.setFont(&fonts::FreeSans9pt7b);
   canvas.setTextColor(cMuted);
-  canvas.drawString("Test reminder. These buttons work", 160, 90);
-  canvas.drawString("even while the screen is locked.", 160, 110);
-  button({16, 160, 140, 52}, "Sipped +2 oz", [] { actions::addWater(2); });
-  button({164, 160, 140, 52}, "Dismiss", [] { goHome(); });
+  canvas.drawString(fit(kcalText(f->kcal) + " | " + proteinText(f->protein), r.w - 70).c_str(), r.x + 8, r.y + 22);
+  std::string id = f->id;
+  addHit({r.x, r.y, (int16_t)(r.w - 62), r.h}, [id] { openFoodFromReminder(id); });
+  button({(int16_t)(r.x + r.w - 58), (int16_t)(r.y + 4), 54, (int16_t)(r.h - 8)}, "Next", [] { remind::nextSuggestion(); });
+}
+
+void drawReminder() {
+  bool eat = S.reminderEatOpen, water = S.reminderWaterOpen;
+  ft::Due shown = static_cast<ft::Due>(S.reminderDue);
+  canvas.setTextDatum(top_center);
+
+  if (eat && water) {
+    canvas.setFont(&fonts::FreeSansBold12pt7b);
+    canvas.setTextColor(cKcal);
+    canvas.drawString(remind::message(ft::Due::Both), 160, 4);
+    suggestionBox({4, 32, 312, 42});
+    button({4, 78, 102, 36}, "Log food", [] { openFoodFromReminder(""); }, cKcal);
+    button({109, 78, 102, 36}, "Snooze 15", [] { remind::eatSnooze(); eatAnswered(); });
+    button({214, 78, 102, 36}, "Skip", [] { remind::eatSkip(); eatAnswered(); });
+    button({4, 124, 154, 42}, "Sipped +2 oz", [] { sip(2); }, cWater);
+    button({162, 124, 154, 42}, "+8 oz", [] { sip(8); });
+    button({4, 172, 154, 40}, "Silence 1 h", [] {
+      remind::silenceHour();
+      S.reminderEatOpen = S.reminderWaterOpen = false;
+      app::showToast("Quiet for 1 hour");
+      goHome();
+    });
+    button({162, 172, 154, 40}, "Dismiss", [] { goHome(); });  // goHome treats it as unanswered
+    return;
+  }
+
+  if (eat) {
+    canvas.setFont(&fonts::FreeSansBold12pt7b);
+    canvas.setTextColor(cKcal);
+    canvas.drawString(remind::message(shown == ft::Due::Both ? ft::Due::Eat : shown), 160, 30);
+    suggestionBox({4, 80, 312, 48});
+    button({4, 174, 102, 40}, "Log food", [] { openFoodFromReminder(""); }, cKcal);
+    button({109, 174, 102, 40}, "Snooze 15", [] { remind::eatSnooze(); eatAnswered(); });
+    button({214, 174, 102, 40}, "Skip", [] { remind::eatSkip(); eatAnswered(); });
+    return;
+  }
+
+  if (water) {
+    canvas.setFont(&fonts::FreeSansBold12pt7b);
+    canvas.setTextColor(cWater);
+    canvas.drawString(remind::message(ft::Due::Water), 160, 22);
+    button({8, 60, 304, 48}, "Sipped +2 oz", [] { sip(2); }, cWater);
+    button({4, 116, 102, 40}, "+4 oz", [] { sip(4); });
+    button({109, 116, 102, 40}, "+8 oz", [] { sip(8); });
+    button({214, 116, 102, 40}, "+16 oz", [] { sip(16); });
+    button({4, 172, 154, 40}, "Snooze 20", [] { remind::waterSnooze(); waterAnswered(); });
+    button({162, 172, 154, 40}, "Silence 1 h", [] {
+      remind::silenceHour();
+      S.reminderWaterOpen = false;
+      app::showToast("Quiet for 1 hour");
+      goHome();
+    });
+    return;
+  }
+  goHome();
+}
+
+void drawSettingsMenu() {
+  header("Settings");
+  button({8, 44, 304, 48}, "Reminders & Do not disturb", [] { S.screen = Screen::Reminders; });
+  button({8, 100, 304, 48}, "Hardware test", [] { S.screen = Screen::Diagnostics; });
+  emptyNote(160, "Targets, screen and sound settings: Milestone 6.", cMuted);
+}
+
+void toggleRow(int y, const char* label, bool on, std::function<void()> flip) {
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(middle_left);
+  canvas.setTextColor(cText);
+  canvas.drawString(label, 8, y + 16);
+  button({236, (int16_t)y, 80, 32}, on ? "On" : "Off", std::move(flip), on ? cProtein : 0);
+}
+
+void drawReminders() {
+  header("Reminders");
+  std::string dnd = remind::dndText();
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(top_left);
+  canvas.setTextColor(dnd.empty() ? cText : cWarn);
+  canvas.drawString(fit(dnd.empty() ? std::string("Do not disturb: off") : dnd, 304).c_str(), 8, 36);
+
+  static const struct { const char* label; int64_t secs; } kDnd[] = {
+      {"1 h", 3600}, {"2 h", 7200}, {"3 h", 10800}, {"Until off", -1}};
+  for (int i = 0; i < 4; ++i) {
+    int64_t secs = kDnd[i].secs;
+    button({(int16_t)(4 + i * 79), 58, 75, 34}, kDnd[i].label, [secs] {
+      int64_t now;
+      if (!app::nowLocal(now)) return app::showToast("Set the clock first");
+      remind::setDnd(secs < 0 ? ft::kForever : now + secs);
+      app::showToast("Do not disturb on");
+    });
+  }
+  if (!dnd.empty()) {
+    button({4, 96, 312, 30}, "Turn off Do not disturb", [] {
+      remind::setDnd(0);
+      app::showToast("Do not disturb off");
+    }, cWarn);
+  }
+  toggleRow(132, "Eating reminders", S.settings.eatingReminders,
+            [] { remind::setEatingOn(!S.settings.eatingReminders); });
+  toggleRow(168, "Water reminders", S.settings.waterReminders,
+            [] { remind::setWaterOn(!S.settings.waterReminders); });
+  canvas.setFont(&fonts::FreeSans9pt7b);
+  canvas.setTextDatum(top_left);
+  canvas.setTextColor(cMuted);
+  canvas.drawString(fit(remind::nextText(), 304).c_str(), 8, 203);
 }
 
 }  // namespace
@@ -911,6 +1073,8 @@ void draw() {
     case Screen::DayLog: drawDayLog(); break;
     case Screen::PastDays: drawPastDays(); break;
     case Screen::EntryEdit: drawEntryEdit(); break;
+    case Screen::SettingsMenu: drawSettingsMenu(); break;
+    case Screen::Reminders: drawReminders(); break;
     case Screen::Picker: drawPicker(); break;
     case Screen::ComboAdjust: drawComboAdjust(); break;
     case Screen::Custom: drawCustom(); break;
@@ -954,13 +1118,22 @@ void drag(int dy) {
   redraw = true;
 }
 
+// Any way of leaving the reminder overlay without answering counts as "ignored".
+static void leavingReminder() {
+  if (S.screen != Screen::Reminder) return;
+  if (S.reminderEatOpen || S.reminderWaterOpen) remind::leaveOverlay();
+  S.reminderEatOpen = S.reminderWaterOpen = false;
+}
+
 void goHome() {
+  leavingReminder();
   S.screen = Screen::Home;
   S.listScroll = 0;
   redraw = true;
 }
 
 void openToday() {
+  leavingReminder();
   S.viewDay = 0;
   S.screen = Screen::DayLog;
   S.listScroll = 0;
@@ -968,12 +1141,14 @@ void openToday() {
 }
 
 void openLogFood() {
+  leavingReminder();
   S.screen = Screen::LogFood;
   S.listScroll = 0;
   redraw = true;
 }
 
 void onSleep() {
+  leavingReminder();
   if (S.screen == Screen::Picker || S.screen == Screen::ComboAdjust || S.screen == Screen::Custom ||
       S.screen == Screen::EntryEdit) {
     S.resumeScreen = S.screen;
