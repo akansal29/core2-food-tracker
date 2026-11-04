@@ -388,6 +388,19 @@ void test_behind_pace_nudge_once_per_day() {
   TEST_ASSERT_FALSE(behindPace(c.eat, t, 1500, 3000));               // on pace: no nudge
 }
 
+void test_index_letters_and_sorting() {
+  TEST_ASSERT_TRUE(indexLetter("belVita breakfast biscuits") == 'B');
+  TEST_ASSERT_TRUE(indexLetter("Reese's Peanut Butter Cups") == 'R');
+  TEST_ASSERT_TRUE(indexLetter("7UP") == '#');
+  TEST_ASSERT_TRUE(indexLetter("") == '#');
+  FoodDb db = sampleDb();
+  auto all = db.visibleSorted();  // archived "Old bar" hidden, case-insensitive A-Z
+  TEST_ASSERT_EQUAL(3, all.size());
+  TEST_ASSERT_EQUAL_STRING("Chocolate milk", all[0]->name.c_str());
+  TEST_ASSERT_EQUAL_STRING("Milk + PB", all[1]->name.c_str());
+  TEST_ASSERT_EQUAL_STRING("Peanut butter", all[2]->name.c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_tracking_day_boundary);
@@ -403,6 +416,7 @@ int main(int, char**) {
   RUN_TEST(test_combo_bad_ingredient);
   RUN_TEST(test_servings);
   RUN_TEST(test_recents);
+  RUN_TEST(test_index_letters_and_sorting);
   RUN_TEST(test_logged_days_and_labels);
   RUN_TEST(test_rescale_uses_snapshot);
   RUN_TEST(test_shift_time_and_remaining);

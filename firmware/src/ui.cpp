@@ -350,12 +350,23 @@ void drawFavorites() {
   endList(y - top);
 }
 
+// A-Z jump (Browse): where each letter's heading sits in the last drawn list.
+int letterOffset[27];
+bool letterHas[27];
+int letterSlot(char c) { return c == '#' ? 26 : c - 'A'; }
+
+std::vector<const ft::FoodDef*> browseList() {
+  if (S.browseCategory == 3) return foods::db().visibleSorted();
+  return foods::db().inCategory(static_cast<ft::Category>(S.browseCategory));
+}
+
 void drawBrowse() {
   header("All foods");
-  static const char* kTabs[] = {"Snacks", "Drinks", "Meals"};
-  for (int i = 0; i < 3; ++i) {
+  button({244, 0, 76, 30}, "A-Z", [] { S.screen = Screen::LetterPick; });
+  static const char* kTabs[] = {"Snacks", "Drinks", "Meals", "All"};
+  for (int i = 0; i < 4; ++i) {
     bool on = S.browseCategory == i;
-    button({(int16_t)(4 + i * 105), 34, 102, 32}, kTabs[i],
+    button({(int16_t)(4 + i * 79), 34, 75, 32}, kTabs[i],
            [i] {
              S.browseCategory = i;
              S.listScroll = 0;
@@ -365,19 +376,55 @@ void drawBrowse() {
   beginList({0, 70, 320, 146});
   int y = 70 - S.listScroll;
   int top = y;
-  auto list = foods::db().inCategory(static_cast<ft::Category>(S.browseCategory));
+  auto list = browseList();
+  for (int i = 0; i < 27; ++i) letterHas[i] = false;
   if (list.empty()) {
-    canvas.setFont(&fonts::FreeSans9pt7b);
-    canvas.setTextColor(cMuted);
-    canvas.setTextDatum(top_left);
-    canvas.drawString(foods::hasFoods() ? "Nothing in this group yet." : foods::loadMessage().c_str(), 8, y + 6);
+    emptyNote(y, foods::hasFoods() ? "Nothing in this group yet." : foods::loadMessage().c_str(), cMuted);
     y += 30;
   }
+  char current = 0;
   for (const ft::FoodDef* f : list) {
+    char letter = ft::indexLetter(f->name);
+    if (letter != current) {  // letter heading
+      current = letter;
+      int slot = letterSlot(letter);
+      if (!letterHas[slot]) {
+        letterHas[slot] = true;
+        letterOffset[slot] = y - top;
+      }
+      char label[2] = {letter, 0};
+      canvas.setFont(&fonts::FreeSansBold9pt7b);
+      canvas.setTextColor(cKcal);
+      canvas.setTextDatum(top_left);
+      canvas.drawString(label, 10, y + 3);
+      canvas.drawFastHLine(30, y + 11, 280, cTrack);
+      y += 22;
+    }
     foodRow(y, *f, Screen::Browse);
     y += kRowH;
   }
   endList(y - top);
+}
+
+void drawLetterPick() {
+  button({0, 0, 76, 30}, "< Back", [] { S.screen = Screen::Browse; });
+  canvas.setFont(&fonts::FreeSansBold9pt7b);
+  canvas.setTextDatum(middle_center);
+  canvas.setTextColor(cText);
+  canvas.drawString("Jump to letter", 172, 15);
+  for (int i = 0; i < 27; ++i) {
+    int col = i % 7, row = i / 7;
+    char c = i < 26 ? static_cast<char>('A' + i) : '#';
+    char label[2] = {c, 0};
+    int slot = letterSlot(c);
+    bool has = letterHas[slot];
+    button({(int16_t)(4 + col * 45), (int16_t)(36 + row * 45), 42, 40}, label,
+           [slot] {
+             S.listScroll = letterOffset[slot];  // endList clamps it to the list length
+             S.screen = Screen::Browse;
+           },
+           0, has);
+  }
 }
 
 void backToPickerSource() {
@@ -1069,6 +1116,7 @@ void draw() {
     case Screen::Home: drawHome(); break;
     case Screen::LogFood: drawLogFood(); break;
     case Screen::Browse: drawBrowse(); break;
+    case Screen::LetterPick: drawLetterPick(); break;
     case Screen::Favorites: drawFavorites(); break;
     case Screen::DayLog: drawDayLog(); break;
     case Screen::PastDays: drawPastDays(); break;

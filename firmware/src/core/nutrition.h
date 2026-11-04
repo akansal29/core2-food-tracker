@@ -60,10 +60,15 @@ class FoodDb {
   bool computeCombos(std::vector<std::string>* problems = nullptr);
   // Visible (non-archived) foods in a category, sorted by name.
   std::vector<const FoodDef*> inCategory(Category c) const;
+  // All visible foods, sorted by name.
+  std::vector<const FoodDef*> visibleSorted() const;
 
  private:
   std::vector<FoodDef> foods_;
 };
+
+// Index letter for the A-Z jump: 'A'..'Z', or '#' for names starting with anything else.
+char indexLetter(const std::string& name);
 
 // Rounds to the nearest 0.25 and clamps to 0.25..10.
 float snapServings(float s);

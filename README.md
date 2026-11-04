@@ -9,7 +9,7 @@ reminders. The implementation guide (Claude Docs) is the single source of truth 
 | --- | --- |
 | `firmware/` | PlatformIO project. `src/core/` is hardware-free logic (tested on the laptop); the rest talks to the device. |
 | `sync/` | `foods.py` validates and compiles the food database; `m1_tool.py` sets the clock, pushes the food list (`pushfoods`), and reads stats over USB. |
-| `data/foods.csv` | The food database you edit in a spreadsheet (123 foods). |
+| `data/foods.csv` | The food database you edit in a spreadsheet (142 foods). |
 | `tests/` | Python tests (`python -m pytest tests`). C++ tests live in `firmware/test/`. |
 | `docs/` | `SETUP.md` (Windows + VS Code), `M1`–`M4_CHECKLIST.md` (what to test on the device). |
 

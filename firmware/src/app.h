@@ -10,7 +10,7 @@
 
 namespace app {
 
-constexpr const char* kFirmwareVersion = "0.4.0-m4";
+constexpr const char* kFirmwareVersion = "0.4.1-m4";
 constexpr int kSchemaVersion = 1;
 
 struct Settings {
@@ -35,7 +35,7 @@ struct Settings {
 };
 
 enum class Screen {
-  Home, LogFood, Browse, Favorites, Picker, ComboAdjust, Custom,
+  Home, LogFood, Browse, LetterPick, Favorites, Picker, ComboAdjust, Custom,
   DayLog, PastDays, EntryEdit,
   SettingsMenu, Reminders, Diagnostics, Reminder
 };
@@ -75,7 +75,7 @@ struct State {
   bool comboAdjusted = false;
   ft::Ingredients comboIngredients;   // per-entry copy, never written back to the saved combo
   Screen pickerReturn = Screen::LogFood;
-  int browseCategory = 0;             // ft::Category
+  int browseCategory = 0;             // ft::Category, or 3 = All
   int listScroll = 0;                 // px, for list screens
   CustomForm custom;
 

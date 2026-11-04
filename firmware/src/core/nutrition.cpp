@@ -56,17 +56,41 @@ bool FoodDb::computeCombos(std::vector<std::string>* problems) {
   return ok;
 }
 
-std::vector<const FoodDef*> FoodDb::inCategory(Category c) const {
-  std::vector<const FoodDef*> out;
-  for (const FoodDef& f : foods_)
-    if (!f.archived && categoryOf(f) == c) out.push_back(&f);
-  std::sort(out.begin(), out.end(), [](const FoodDef* a, const FoodDef* b) {
+namespace {
+void sortByName(std::vector<const FoodDef*>& v) {
+  std::sort(v.begin(), v.end(), [](const FoodDef* a, const FoodDef* b) {
     std::string x = a->name, y = b->name;
     std::transform(x.begin(), x.end(), x.begin(), ::tolower);
     std::transform(y.begin(), y.end(), y.begin(), ::tolower);
     return x < y;
   });
+}
+}  // namespace
+
+std::vector<const FoodDef*> FoodDb::inCategory(Category c) const {
+  std::vector<const FoodDef*> out;
+  for (const FoodDef& f : foods_)
+    if (!f.archived && categoryOf(f) == c) out.push_back(&f);
+  sortByName(out);
   return out;
+}
+
+std::vector<const FoodDef*> FoodDb::visibleSorted() const {
+  std::vector<const FoodDef*> out;
+  for (const FoodDef& f : foods_)
+    if (!f.archived) out.push_back(&f);
+  sortByName(out);
+  return out;
+}
+
+char indexLetter(const std::string& name) {
+  for (char c : name) {
+    if (c == ' ' || c == '\'' || c == '"') continue;  // skip leading spaces and quotes
+    if (c >= 'a' && c <= 'z') return static_cast<char>(c - 'a' + 'A');
+    if (c >= 'A' && c <= 'Z') return c;
+    return '#';
+  }
+  return '#';
 }
 
 float snapServings(float s) {
