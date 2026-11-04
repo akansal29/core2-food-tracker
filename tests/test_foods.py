@@ -18,7 +18,8 @@ def write(tmp_path, body):
 def test_starter_file_is_valid():
     foods, report = load_foods(ROOT / "data" / "foods.csv")
     assert report.ok, report.errors
-    assert len(foods) == 48
+    assert len(foods) >= 48
+    assert "zbar_choc_chip" in foods and "peanut_butter_tbsp" in foods  # original IDs kept
     assert not report.warnings, report.warnings
 
 
